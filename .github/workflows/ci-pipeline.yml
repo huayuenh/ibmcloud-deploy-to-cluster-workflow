@@ -60,10 +60,6 @@ jobs:
         image: "${{ steps.build-image.outputs.image }}:${{ steps.build-image.outputs.tags }}"
         action: "push"
 
-        sha: ${{ github.sha }}
-        target_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-        github_repository: ${{ github.repository }}
-
     - name: Deploy to IKS
       run: |
         ibmcloud target
