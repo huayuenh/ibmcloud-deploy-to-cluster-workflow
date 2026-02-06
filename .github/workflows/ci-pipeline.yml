@@ -57,7 +57,7 @@ jobs:
       uses: huayuenh/ghaactions/icr@main
       with:
         apikey: ${{ secrets.IBMCLOUD_API_KEY }}
-        image: "${{ steps.build-image.outputs.image }}:${{ steps.build-image.outputs.tags }}"
+        local-image: "${{ steps.build-image.outputs.image }}:${{ steps.build-image.outputs.tags }}"
         action: "push"
 
     - name: Deploy to IKS
