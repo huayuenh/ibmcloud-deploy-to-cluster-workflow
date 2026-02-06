@@ -52,6 +52,9 @@ jobs:
         tags: "${{ github.sha }}"
         containerfiles: |
           ./Dockerfile
+    - name: log images
+      run: |
+        buildah-images
 
     - id: push
       uses: huayuenh/ghaactions/icr@main
