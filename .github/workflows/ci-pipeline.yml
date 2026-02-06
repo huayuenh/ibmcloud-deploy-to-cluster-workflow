@@ -58,6 +58,7 @@ jobs:
       with:
         apikey: ${{ secrets.IBMCLOUD_API_KEY }}
         local-image: "${{ steps.build-image.outputs.image }}:${{ steps.build-image.outputs.tags }}"
+        local-image: "${{ steps.build-image.outputs.image }}:${{ steps.build-image.outputs.tags }}"
         action: "push"
 
     - name: Deploy to IKS
