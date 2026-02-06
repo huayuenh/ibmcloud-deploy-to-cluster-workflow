@@ -53,7 +53,7 @@ jobs:
         containerfiles: |
           ./Dockerfile
 
-    - id: build-image
+    - id: push
       uses: huayuenh/ghaactions/icr@main
       with:
         apikey: ${{ secrets.IBMCLOUD_API_KEY }}
