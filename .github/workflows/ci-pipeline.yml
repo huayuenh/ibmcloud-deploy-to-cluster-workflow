@@ -73,7 +73,7 @@ jobs:
     
     - name: Build Docker image
       id: build
-      uses: ./docker-build-action
+      uses: huayuenh/ghaactions/build-action@main
       with:
         context: .
         dockerfile: Dockerfile
@@ -93,7 +93,7 @@ jobs:
     
     - name: Push to IBM Cloud Container Registry
       id: push
-      uses: ./
+      uses: huayuenh/ghaactions/icr@main
       with:
         apikey: ${{ secrets.IBM_CLOUD_API_KEY }}
         image: ${{ env.IBM_CLOUD_REGION }}.icr.io/${{ env.IBM_CLOUD_NAMESPACE }}/myapp:${{ steps.image-tag.outputs.tag }}
