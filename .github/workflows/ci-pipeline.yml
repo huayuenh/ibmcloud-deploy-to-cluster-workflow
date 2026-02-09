@@ -4,7 +4,7 @@
 #
 # 1. Ensure that your repository contains a Dockerfile
 # 2. Setup secrets in your repository by going to settings: Create ICR_NAMESPACE and IBM_CLOUD_API_KEY
-# 3. Change the values for the IBM_CLOUD_REGION, REGISTRY_HOSTNAME, IMAGE_NAME, IKS_CLUSTER, DEPLOYMENT_NAME, and PORT
+# 3. Change the values for the IBMCLOUD_REGION, REGISTRY_HOSTNAME, IMAGE_NAME, IKS_CLUSTER, DEPLOYMENT_NAME, and PORT
 
 name: Build and Deploy to IKS
 
@@ -22,7 +22,7 @@ env:
   ICR_NAMESPACE: ${{ vars.ICR_NAMESPACE }}
   REGISTRY_HOSTNAME: ${{ vars.ICR_REGION }}
   IMAGE_NAME: ${{ vars.IMAGE_NAME }}
-  IKS_CLUSTER: ${{ vars.CLUSTER_NAME }}
+  CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
   DEPLOYMENT_NAME: ${{ vars.IKS_DEPLOYMENT_NAME }}
   RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
   PORT: 8001
@@ -100,17 +100,56 @@ jobs:
         local-image: ${{ steps.build.outputs.image-name }}
         action: push
         scan: true
-        region: ${{ env.IBM_CLOUD_REGION }}
+        region: ${{ env.IBMCLOUD_REGION }}
 
-    - name: Deploy to IKS
+    - name: Deploy to Kubernetes
+      id: deploy
+      if: github.event_name != 'pull_request'
+      uses: huayuenh/ghaactions/deploy-action@main
+      with:
+        image: ${{ env.REGISTRY_HOSTNAME }}/${{ env.ICR_NAMESPACE }}/myapp:${{ steps.image-tag.outputs.tag }}
+        cluster-type: kubernetes
+        ibmcloud-apikey: ${{ secrets.IBMCLOUD_API_KEY }}
+        cluster-name: ${{ env.CLUSTER_NAME }}
+        cluster-region: ${{ env.IBMCLOUD_REGION }}
+        deployment-name: myapp
+        namespace: ${{ steps.namespace.outputs.namespace }}
+        port: 8080
+        replicas: 3
+        service-type: LoadBalancer
+        health-check-path: /health
+        health-check-timeout: 300
+        resource-limits-cpu: 500m
+        resource-limits-memory: 512Mi
+        resource-requests-cpu: 250m
+        resource-requests-memory: 256Mi
+        env-vars: |
+          VERSION=${{ steps.image-tag.outputs.tag }}
+          ENVIRONMENT=${{ steps.namespace.outputs.namespace }}
+          BUILD_SHA=${{ github.sha }}
+    
+    - name: Display deployment summary
+      if: github.event_name != 'pull_request'
       run: |
-        ibmcloud target
-        ibmcloud ks cluster config --cluster "cd-setup-test-cluster"
-        kubectl config current-context
-        kubectl create deployment $DEPLOYMENT_NAME --image=$REGISTRY_HOSTNAME/$ICR_NAMESPACE/$IMAGE_NAME:$GITHUB_SHA --dry-run -o yaml > deployment.yaml
-        kubectl apply -f deployment.yaml
-        kubectl rollout status deployment/$DEPLOYMENT_NAME
-        kubectl create service loadbalancer $DEPLOYMENT_NAME --tcp=80:$PORT --dry-run -o yaml > service.yaml
-        kubectl apply -f service.yaml
-        kubectl get services -o wide
+        echo "### Deployment Summary :rocket:" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "#### Build Information" >> $GITHUB_STEP_SUMMARY
+        echo "**Image Name:** \`${{ steps.build.outputs.image-name }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Image ID:** \`${{ steps.build.outputs.image-id }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Registry:** \`${{ env.REGISTRY_HOSTNAME }}/${{ env.ICR_NAMESPACE }}/myapp:${{ steps.image-tag.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "#### Deployment Information" >> $GITHUB_STEP_SUMMARY
+        echo "**Status:** ${{ steps.deploy.outputs.deployment-status }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Namespace:** ${{ steps.namespace.outputs.namespace }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Application URL:** ${{ steps.deploy.outputs.application-url }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Service IP:** ${{ steps.deploy.outputs.service-ip }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Health Check:** ${{ steps.deploy.outputs.health-check-result }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "#### Git Information" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Branch/Tag:** ${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [ -n "${{ steps.deploy.outputs.application-url }}" ]; then
+          echo "🌐 **Access your application at:** ${{ steps.deploy.outputs.application-url }}" >> $GITHUB_STEP_SUMMARY
+        fi
 
