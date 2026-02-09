@@ -44,25 +44,63 @@ jobs:
         npm install
         npm run test-unit
 
-    - id: build-image
-      name: Build image
-      uses: redhat-actions/buildah-build@v2
-      with:
-        image: "${{ vars.ICR_REGION }}/${{ vars.ICR_NAMESPACE }}/${{ vars.IMAGE_NAME }}"
-        tags: "${{ github.sha }}"
-        containerfiles: |
-          ./Dockerfile
-    - name: log images
+    - name: Set image tag
+      id: image-tag
       run: |
-        buildah-images
-
-    - id: push
-      uses: huayuenh/ghaactions/icr@main
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          # Use tag name for releases
+          TAG=${GITHUB_REF#refs/tags/}
+        elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
+          # Use commit SHA for main branch
+          TAG=${{ github.sha }}
+        else
+          # Use branch name for other branches
+          TAG=${GITHUB_REF#refs/heads/}
+        fi
+        echo "tag=$TAG" >> $GITHUB_OUTPUT
+        echo "Image tag: $TAG"
+    
+    - name: Set deployment namespace
+      id: namespace
+      run: |
+        if [[ "${{ github.ref }}" == refs/heads/main ]]; then
+          echo "namespace=production" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == refs/heads/develop ]]; then
+          echo "namespace=staging" >> $GITHUB_OUTPUT
+        else
+          echo "namespace=development" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Build Docker image
+      id: build
+      uses: ./docker-build-action
       with:
-        apikey: ${{ secrets.IBMCLOUD_API_KEY }}
-        image: "${{ steps.build-image.outputs.image }}:${{ steps.build-image.outputs.tags }}"
-        local-image: "${{ steps.build-image.outputs.image }}:${{ steps.build-image.outputs.tags }}"
-        action: "push"
+        context: .
+        dockerfile: Dockerfile
+        image-name: myapp:${{ steps.image-tag.outputs.tag }}
+        build-args: |
+          VERSION=${{ steps.image-tag.outputs.tag }}
+          BUILD_DATE=${{ github.event.head_commit.timestamp }}
+          COMMIT_SHA=${{ github.sha }}
+        labels: |
+          org.opencontainers.image.title=MyApp
+          org.opencontainers.image.version=${{ steps.image-tag.outputs.tag }}
+          org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.source=${{ github.repositoryUrl }}
+        no-cache: false
+        pull: true
+    
+    - name: Push to IBM Cloud Container Registry
+      id: push
+      uses: ./
+      with:
+        apikey: ${{ secrets.IBM_CLOUD_API_KEY }}
+        image: ${{ env.IBM_CLOUD_REGION }}.icr.io/${{ env.IBM_CLOUD_NAMESPACE }}/myapp:${{ steps.image-tag.outputs.tag }}
+        local-image: ${{ steps.build.outputs.image-name }}
+        action: push
+        scan: true
+        region: ${{ env.IBM_CLOUD_REGION }}
 
     - name: Deploy to IKS
       run: |
