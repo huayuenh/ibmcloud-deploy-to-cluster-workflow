@@ -116,7 +116,9 @@ jobs:
         namespace: ${{ steps.namespace.outputs.namespace }}
         port: 8080
         replicas: 3
-        service-type: NodePort
+        service-type: ClusterIP
+        ingress-host: myapp.cluster-ingress-subdomain
+        ingress-tls: true
         health-check-path: /health
         health-check-timeout: 300
         resource-limits-cpu: 500m
