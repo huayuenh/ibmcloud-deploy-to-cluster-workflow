@@ -117,8 +117,8 @@ jobs:
         port: 8080
         replicas: 3
         service-type: ClusterIP
-        ingress-host: cd-setup-test-cluster-c875ab6ccb1204e43cf53a8a7c8281f3-0000.us-south.containers.appdomain.cloud
         ingress-tls: true
+        auto-ingress: true
         health-check-path: /health
         health-check-timeout: 300
         resource-limits-cpu: 500m
