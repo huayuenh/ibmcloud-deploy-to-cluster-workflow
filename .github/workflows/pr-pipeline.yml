@@ -11,6 +11,11 @@ name: Build and Test PR
 on:
   workflow_dispatch:
     branches: [ main ]
+    inputs:
+      app-name:
+        description: 'Application name (defaults to repository name)'
+        required: false
+        type: string
   pull_request:
     types: [opened, reopened]
 
@@ -33,7 +38,7 @@ jobs:
     - id: checkout
       name: Clone repo
       uses: actions/checkout@v4
-    
+
     - id: set-commit-status-start
       name: Set up initial commit status
       uses: huayuenh/ghe-commit-status@main
@@ -58,15 +63,13 @@ jobs:
       with:
         context: .
         dockerfile: Dockerfile
-        image-name: myapp:${{ steps.image-tag.outputs.tag }}
+        app-name: ${{ github.event.inputs.app-name }}
+        tag: pr-${{ github.event.pull_request.number }}-${{ github.sha }}
         build-args: |
-          VERSION=${{ steps.image-tag.outputs.tag }}
-          BUILD_DATE=${{ github.event.head_commit.timestamp }}
+          BUILD_DATE=${{ github.event.pull_request.updated_at }}
           COMMIT_SHA=${{ github.sha }}
         labels: |
-          org.opencontainers.image.title=MyApp
-          org.opencontainers.image.version=${{ steps.image-tag.outputs.tag }}
-          org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+          org.opencontainers.image.created=${{ github.event.pull_request.updated_at }}
           org.opencontainers.image.revision=${{ github.sha }}
           org.opencontainers.image.source=${{ github.repositoryUrl }}
         no-cache: false
@@ -77,11 +80,34 @@ jobs:
       uses: huayuenh/ghe-icr@main
       with:
         apikey: ${{ secrets.IBMCLOUD_API_KEY }}
-        image: ${{ env.REGISTRY_HOSTNAME }}/${{ env.ICR_NAMESPACE }}/myapp:${{ steps.image-tag.outputs.tag }}
+        image: ${{ env.REGISTRY_HOSTNAME }}/${{ env.ICR_NAMESPACE }}/${{ steps.build.outputs.image-name }}
         local-image: ${{ steps.build.outputs.image-name }}
         action: push
         scan: true
         region: ${{ env.IBMCLOUD_REGION }}
+
+    - name: Delete PR image from registry
+      if: always()
+      uses: huayuenh/ghe-icr@main
+      with:
+        apikey: ${{ secrets.IBMCLOUD_API_KEY }}
+        image: ${{ env.REGISTRY_HOSTNAME }}/${{ env.ICR_NAMESPACE }}/${{ steps.build.outputs.image-name }}
+        action: delete
+        region: ${{ env.IBMCLOUD_REGION }}
+      
+    - name: Display build summary
+      run: |
+        echo "### Build Summary :rocket:" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "#### Build Information" >> $GITHUB_STEP_SUMMARY
+        echo "**Image Name:** \`${{ steps.build.outputs.image-name }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Image ID:** \`${{ steps.build.outputs.image-id }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Registry:** \`${{ env.REGISTRY_HOSTNAME }}/${{ env.ICR_NAMESPACE }}/${{ steps.build.outputs.image-name }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "#### Pull Request Information" >> $GITHUB_STEP_SUMMARY
+        echo "**PR Number:** #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Branch:** ${{ github.head_ref }}" >> $GITHUB_STEP_SUMMARY
 
     - id: set-commit-status-fail
       if: ${{ failure() }}
