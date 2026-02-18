@@ -17,6 +17,11 @@ on:
         description: 'Application name (defaults to repository name)'
         required: false
         type: string
+    namespace:
+      description: 'Kubernetes namespace for deployment'
+      required: false
+      type: string
+      default: 'production'
 
 # Environment variables available to all jobs and steps in this workflow
 env:
@@ -28,6 +33,7 @@ env:
   IMAGE_NAME: ${{ vars.IMAGE_NAME }}
   CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
   DEPLOYMENT_NAME: ${{ vars.IKS_DEPLOYMENT_NAME }}
+  DEPLOY_NAMESPACE: ${{ github.event.inputs.namespace || (github.ref == 'refs/heads/main' && 'production') || (github.ref == 'refs/heads/develop' && 'staging') || 'development' }}
   RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
   PORT: 8001
 
@@ -47,18 +53,7 @@ jobs:
       run: |
         npm install
         npm run test-unit
-
-    - name: Set deployment namespace
-      id: namespace
-      run: |
-        if [[ "${{ github.ref }}" == refs/heads/main ]]; then
-          echo "namespace=production" >> $GITHUB_OUTPUT
-        elif [[ "${{ github.ref }}" == refs/heads/develop ]]; then
-          echo "namespace=staging" >> $GITHUB_OUTPUT
-        else
-          echo "namespace=development" >> $GITHUB_OUTPUT
-        fi
-    
+ 
     - name: Build Docker image
       id: build
       uses: huayuenh/ghe-docker-build@main
@@ -99,7 +94,7 @@ jobs:
         cluster-name: ${{ env.CLUSTER_NAME }}
         cluster-region: ${{ env.IBMCLOUD_REGION }}
         deployment-name: ${{ steps.build.outputs.app-name }}
-        namespace: ${{ steps.namespace.outputs.namespace }}
+        namespace: ${{ env.DEPLOY_NAMESPACE }}
         port: 8080
         replicas: 3
         service-type: ClusterIP
@@ -113,7 +108,7 @@ jobs:
         resource-requests-memory: 256Mi
         env-vars: |
           VERSION=${{ steps.image-tag.outputs.tag }}
-          ENVIRONMENT=${{ steps.namespace.outputs.namespace }}
+          ENVIRONMENT=${{ env.DEPLOY_NAMESPACE }}
           BUILD_SHA=${{ github.sha }}
     
     - name: Display deployment summary
@@ -128,7 +123,7 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "#### Deployment Information" >> $GITHUB_STEP_SUMMARY
         echo "**Status:** ${{ steps.deploy.outputs.deployment-status }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Namespace:** ${{ steps.namespace.outputs.namespace }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Namespace:** ${{ env.DEPLOY_NAMESPACE }}" >> $GITHUB_STEP_SUMMARY
         echo "**Application URL:** ${{ steps.deploy.outputs.application-url }}" >> $GITHUB_STEP_SUMMARY
         echo "**Service IP:** ${{ steps.deploy.outputs.service-ip }}" >> $GITHUB_STEP_SUMMARY
         echo "**Health Check:** ${{ steps.deploy.outputs.health-check-result }}" >> $GITHUB_STEP_SUMMARY
