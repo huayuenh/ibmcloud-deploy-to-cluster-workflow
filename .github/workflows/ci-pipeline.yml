@@ -56,7 +56,7 @@ jobs:
  
     - name: Build Docker image
       id: build
-      uses: huayuenh/ghe-docker-build@main
+      uses: huayuenh/docker-container-build-action@main
       with:
         context: .
         dockerfile: Dockerfile
@@ -74,7 +74,7 @@ jobs:
     
     - name: Push to IBM Cloud Container Registry
       id: push
-      uses: huayuenh/ghe-icr@main
+      uses: huayuenh/container-registry-service-action@main
       with:
         apikey: ${{ secrets.IBMCLOUD_API_KEY }}
         image: ${{ env.REGISTRY_HOSTNAME }}/${{ env.ICR_NAMESPACE }}/${{ steps.build.outputs.image-name }}
@@ -86,7 +86,7 @@ jobs:
     - name: Deploy to Kubernetes
       id: deploy
       if: github.event_name != 'pull_request'
-      uses: huayuenh/ghe-cluster-deploy@main
+      uses: huayuenh/cluster-service-action@main
       with:
         image: ${{ env.REGISTRY_HOSTNAME }}/${{ env.ICR_NAMESPACE }}/${{ steps.build.outputs.image-name }}
         cluster-type: kubernetes
