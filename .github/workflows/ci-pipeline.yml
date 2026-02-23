@@ -47,13 +47,25 @@ jobs:
     - id: checkout
       name: Clone repo
       uses: actions/checkout@v4
-  
+
+    - name: Set application name
+      id: app-info
+      run: |
+        # Use input app-name or derive from repository name
+        if [ -n "${{ github.event.inputs.app-name }}" ]; then
+          APP_NAME="${{ github.event.inputs.app-name }}"
+        else
+          APP_NAME="${{ github.event.repository.name }}"
+        fi
+        echo "app-name=$APP_NAME" >> $GITHUB_OUTPUT
+        echo "Application name: $APP_NAME"
+
     - id: unit-test
       name: Run Unit tests
       run: |
         npm install
         npm run test-unit
- 
+
     - name: Build Docker image
       id: build
       uses: huayuenh/docker-container-build-action@main
@@ -159,7 +171,7 @@ jobs:
         ibmcloud-apikey: ${{ secrets.IBM_CLOUD_API_KEY }}
         cluster-name: ${{ env.CLUSTER_NAME }}
         cluster-region: ${{ env.IBM_CLOUD_REGION }}
-        deployment-name: ${{ steps.build.outputs.app-name }}
+        deployment-name: ${{ steps.app-info.outputs.app-name }}
         namespace: ${{ env.DEPLOY_NAMESPACE }}
         port: 8080
         service-type: ClusterIP
