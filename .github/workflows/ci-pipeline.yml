@@ -140,6 +140,8 @@ jobs:
         fi
         
         # More comprehensive tests should be included her
+        #force error for test
+        exit 1
 
         echo "::endgroup::"
         echo "✅ All acceptance tests passed"
