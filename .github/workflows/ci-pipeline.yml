@@ -187,7 +187,8 @@ jobs:
         fi
         
         # More comprehensive tests should be included her
-
+        #force rollback
+        exit 1
         echo "::endgroup::"
         echo "✅ All acceptance tests passed"
 
