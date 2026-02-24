@@ -9,6 +9,7 @@ This repository showcases production-ready CI pipelines for containerized applic
 - **Pull Request CI** - Automated build, test, and scan for pull requests
 - **Continuous Deployment** - Automated deployment on merge to main branch
 - **Automatic Rollback** - Native Kubernetes rollback using ReplicaSets on deployment failure
+- **Manifest Templates** - Version-controlled deployment manifests with variable substitution
 - **Dynamic Image Naming** - Inline image name computation without pre-processing steps
 - **Multi-Environment Deployment** - Branch-based namespace selection (production, staging, development)
 - **Security Scanning** - Automated vulnerability scanning with IBM Cloud Container Registry
@@ -41,12 +42,13 @@ This repository showcases production-ready CI pipelines for containerized applic
    - Uses `huayuenh/container-registry-service-action`
    - Performs vulnerability scanning
    - Stores in IBM Cloud Container Registry
-5. **Deploy to Kubernetes** - Deploy with full configuration
+5. **Deploy to Kubernetes** - Deploy using manifest template
    - Uses `huayuenh/cluster-service-action` with `action: deploy`
+   - Applies version-controlled manifest template (`.k8s/deployment.yaml`)
+   - Substitutes variables (image, replicas, resources, etc.)
    - Creates/updates deployment with 3 replicas
    - Configures ClusterIP service
-   - Sets up automatic ingress with TLS
-   - Performs health checks
+   - Performs health checks with liveness and readiness probes
    - Configures resource limits and requests
 6. **Run Acceptance Tests** - Validate deployment
    - Tests application endpoint
@@ -60,21 +62,19 @@ This repository showcases production-ready CI pipelines for containerized applic
 **Key Features:**
 
 ```yaml
+# Manifest template with variable substitution
+manifest-template: .k8s/deployment.yaml
+
 # Dynamic inline image naming - no pre-processing step needed
-image: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ github.event.inputs.app-name || github.event.repository.name }}:${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
+image: ${{ vars.ICR_REGION }}/${{ vars.ICR_NAMESPACE }}/${{ github.event.inputs.app-name || github.event.repository.name }}:${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
 
 # Automatic namespace selection based on branch
 namespace: production  # main branch
 namespace: staging     # develop branch
 namespace: development # other branches
 
-# Automatic ingress with TLS
-auto-ingress: true
-ingress-tls: true
-
-# Health check validation
-health-check-path: /health
-health-check-timeout: 300
+# Version label for tracking
+version: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
 
 # Resource management
 resource-limits-cpu: 500m

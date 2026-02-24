@@ -79,6 +79,7 @@ jobs:
       if: github.event_name != 'pull_request'
       uses: huayuenh/cluster-service-action@main
       with:
+        action: deploy
         image: ${{ vars.ICR_REGION }}/${{ vars.ICR_NAMESPACE }}/${{ github.event.inputs.app-name || github.event.repository.name }}:${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
         cluster-type: kubernetes
         ibmcloud-apikey: ${{ secrets.IBMCLOUD_API_KEY }}
@@ -86,17 +87,16 @@ jobs:
         cluster-region: ${{ vars.IBMCLOUD_REGION }}
         deployment-name: ${{ github.event.inputs.app-name || github.event.repository.name }}
         namespace: ${{ github.event.inputs.namespace || (github.ref == 'refs/heads/main' && 'production') || (github.ref == 'refs/heads/develop' && 'staging') || 'development' }}
+        manifest-template: .k8s/deployment.yaml
         port: 8080
         replicas: 3
         service-type: ClusterIP
-        ingress-tls: true
-        auto-ingress: true
-        health-check-path: /health
-        health-check-timeout: 300
         resource-limits-cpu: 500m
         resource-limits-memory: 512Mi
         resource-requests-cpu: 250m
         resource-requests-memory: 256Mi
+        image-pull-secret: ${{ vars.IMAGE_PULL_SECRET }}
+        version: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
         env-vars: |
           VERSION=${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
           ENVIRONMENT=${{ github.event.inputs.namespace || (github.ref == 'refs/heads/main' && 'production') || (github.ref == 'refs/heads/develop' && 'staging') || 'development' }}
