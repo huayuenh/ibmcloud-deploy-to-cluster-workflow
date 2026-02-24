@@ -191,57 +191,113 @@ jobs:
         echo "::endgroup::"
         echo "✅ All acceptance tests passed"
 
-    - name: Rollback deployment
+    - name: Rollback deployment using Kubernetes native rollback
       id: rollback
       if: |
         github.event_name != 'pull_request' &&
-        steps.acceptance-tests.outcome == 'failure' &&
-        steps.deploy.outputs.previous-image != ''
-      uses: huayuenh/cluster-service-action@main
-      with:
-        image: ${{ steps.deploy.outputs.previous-image }}
-        cluster-type: kubernetes
-        ibmcloud-apikey: ${{ secrets.IBMCLOUD_API_KEY }}
-        cluster-name: ${{ env.CLUSTER_NAME }}
-        cluster-region: ${{ env.IBM_CLOUD_REGION }}
-        deployment-name: ${{ steps.app-info.outputs.app-name }}
-        namespace: ${{ env.DEPLOY_NAMESPACE }}
-        port: 8080
-        service-type: ClusterIP
-        replicas: 3
-        auto-ingress: true
-        resource-limits-cpu: 500m
-        resource-limits-memory: 512Mi
-        resource-requests-cpu: 250m
-        resource-requests-memory: 256Mi
-        env-vars: |
-          VERSION=rollback-${{ github.sha }}
-          ENVIRONMENT=${{ env.DEPLOY_NAMESPACE }}
-          BUILD_SHA=${{ github.sha }}
-          ROLLBACK=true
+        steps.acceptance-tests.outcome == 'failure'
+      run: |
+        echo "::group::Performing Kubernetes rollback"
+        
+        # Install IBM Cloud CLI and Kubernetes plugin
+        curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
+        ibmcloud plugin install kubernetes-service -f
+        
+        # Login to IBM Cloud
+        ibmcloud login --apikey "${{ secrets.IBMCLOUD_API_KEY }}" -r "${{ env.IBMCLOUD_REGION }}"
+        
+        # Set resource group if specified
+        if [ -n "${{ env.RESOURCE_GROUP }}" ]; then
+          ibmcloud target -g "${{ env.RESOURCE_GROUP }}"
+        fi
+        
+        # Get cluster config
+        ibmcloud ks cluster config --cluster "${{ env.CLUSTER_NAME }}"
+        
+        # Check if deployment exists and has revision history
+        DEPLOYMENT_NAME="${{ steps.app-info.outputs.app-name }}"
+        NAMESPACE="${{ env.DEPLOY_NAMESPACE }}"
+        
+        if ! kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" &>/dev/null; then
+          echo "::error::Deployment $DEPLOYMENT_NAME not found in namespace $NAMESPACE"
+          exit 1
+        fi
+        
+        # Check revision history
+        REVISION_COUNT=$(kubectl rollout history deployment/"$DEPLOYMENT_NAME" -n "$NAMESPACE" | grep -c "^[0-9]" || echo "0")
+        
+        if [ "$REVISION_COUNT" -le 1 ]; then
+          echo "::error::No previous revision available for rollback"
+          echo "::error::This appears to be the first deployment - manual intervention required"
+          exit 1
+        fi
+        
+        echo "Found $REVISION_COUNT revisions in history"
+        echo "Current deployment status:"
+        kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE"
+        
+        # Perform rollback to previous revision
+        echo ""
+        echo "Initiating rollback to previous revision..."
+        kubectl rollout undo deployment/"$DEPLOYMENT_NAME" -n "$NAMESPACE"
+        
+        # Wait for rollback to complete
+        echo "Waiting for rollback to complete..."
+        if kubectl rollout status deployment/"$DEPLOYMENT_NAME" -n "$NAMESPACE" --timeout=5m; then
+          echo "✓ Rollback completed successfully"
+          
+          # Get the rolled back revision info
+          CURRENT_REVISION=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" -o jsonpath='{.metadata.annotations.deployment\.kubernetes\.io/revision}')
+          echo "Rolled back to revision: $CURRENT_REVISION"
+          
+          # Get current image
+          CURRENT_IMAGE=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" -o jsonpath='{.spec.template.spec.containers[0].image}')
+          echo "Current image: $CURRENT_IMAGE"
+          
+          echo "rollback-status=success" >> $GITHUB_OUTPUT
+          echo "rollback-revision=$CURRENT_REVISION" >> $GITHUB_OUTPUT
+          echo "rollback-image=$CURRENT_IMAGE" >> $GITHUB_OUTPUT
+        else
+          echo "::error::Rollback failed or timed out"
+          echo "rollback-status=failed" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        echo "::endgroup::"
     
-    - name: Verify rollback
+    - name: Verify rollback health
       id: verify-rollback
       if: |
         github.event_name != 'pull_request' &&
         steps.rollback.outcome == 'success'
       run: |
-        echo "::group::Verifying rollback"
-        echo "✓ Rollback deployment completed successfully"
-        echo "::notice::Deployment rolled back to: ${{ steps.deploy.outputs.previous-image }}"
-        echo "Rollback status: ${{ steps.rollback.outputs.deployment-status }}"
-        echo "Health check: ${{ steps.rollback.outputs.health-check-result }}"
+        echo "::group::Verifying rollback health"
+        
+        DEPLOYMENT_NAME="${{ steps.app-info.outputs.app-name }}"
+        NAMESPACE="${{ env.DEPLOY_NAMESPACE }}"
+        
+        # Wait a bit for pods to stabilize
+        sleep 10
+        
+        # Check pod status
+        echo "Checking pod status..."
+        kubectl get pods -n "$NAMESPACE" -l app="$DEPLOYMENT_NAME"
+        
+        # Get ready replicas
+        READY_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" -o jsonpath='{.status.readyReplicas}')
+        DESIRED_REPLICAS=$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')
+        
+        echo "Ready replicas: $READY_REPLICAS/$DESIRED_REPLICAS"
+        
+        if [ "$READY_REPLICAS" = "$DESIRED_REPLICAS" ]; then
+          echo "✓ All replicas are ready after rollback"
+          echo "::notice::Successfully rolled back to revision ${{ steps.rollback.outputs.rollback-revision }}"
+          echo "::notice::Current image: ${{ steps.rollback.outputs.rollback-image }}"
+        else
+          echo "::warning::Not all replicas are ready yet ($READY_REPLICAS/$DESIRED_REPLICAS)"
+        fi
+        
         echo "::endgroup::"
-    
-    - name: Report rollback failure
-      if: |
-        github.event_name != 'pull_request' &&
-        steps.acceptance-tests.outcome == 'failure' &&
-        steps.deploy.outputs.previous-image == ''
-      run: |
-        echo "::error::Acceptance tests failed but no previous deployment found for rollback"
-        echo "::error::This appears to be the first deployment - manual intervention required"
-        exit 1
 
     - name: Display deployment summary
       if: github.event_name != 'pull_request'
