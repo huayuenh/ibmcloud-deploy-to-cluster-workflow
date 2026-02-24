@@ -1,0 +1,187 @@
+name: Deploy to Kubernetes (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Deployment environment (production, staging, development)'
+        required: true
+        type: string
+      
+      image-tag:
+        description: 'Docker image tag (defaults to commit SHA)'
+        required: false
+        type: string
+        default: ''
+      
+      cluster-name:
+        description: 'Kubernetes cluster name'
+        required: false
+        type: string
+        default: ''
+      
+      cluster-region:
+        description: 'Cluster region'
+        required: false
+        type: string
+        default: 'us-south'
+      
+      run-acceptance-tests:
+        description: 'Run acceptance tests after deployment'
+        required: false
+        type: boolean
+        default: true
+      
+      auto-rollback:
+        description: 'Automatically rollback on failure'
+        required: false
+        type: boolean
+        default: true
+    
+    secrets:
+      ibmcloud-apikey:
+        description: 'IBM Cloud API key'
+        required: true
+    
+    outputs:
+      app-url:
+        description: 'Deployed application URL'
+        value: ${{ jobs.deploy.outputs.app-url }}
+      
+      image:
+        description: 'Full image name with tag'
+        value: ${{ jobs.build.outputs.image }}
+      
+      deployment-status:
+        description: 'Deployment status (success/failure)'
+        value: ${{ jobs.deploy.outputs.status }}
+
+jobs:
+  build:
+    name: Build and Push Image
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+      image-name: ${{ steps.build.outputs.image-name }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Build Docker image
+        id: build
+        uses: huayuenh/docker-container-build-action@main
+        with:
+          context: .
+          dockerfile: Dockerfile
+          tag: ${{ inputs.image-tag || github.sha }}
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            COMMIT_SHA=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.repositoryUrl }}
+          no-cache: false
+          pull: true
+      
+      - name: Push to IBM Cloud Container Registry
+        id: push
+        uses: huayuenh/container-registry-service-action@main
+        with:
+          apikey: ${{ secrets.ibmcloud-apikey }}
+          image: ${{ vars.ICR_REGION }}/${{ vars.ICR_NAMESPACE }}/${{ steps.build.outputs.image-name }}
+          local-image: ${{ steps.build.outputs.image-name }}
+          action: push
+          scan: true
+          region: ${{ vars.IBMCLOUD_REGION }}
+
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    needs: build
+    environment: ${{ inputs.environment }}
+    outputs:
+      app-url: ${{ steps.deploy.outputs.application-url }}
+      status: ${{ steps.deploy.outputs.deployment-status }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Deploy to cluster
+        id: deploy
+        uses: huayuenh/cluster-service-action@main
+        with:
+          image: ${{ needs.build.outputs.image }}
+          ibmcloud-apikey: ${{ secrets.ibmcloud-apikey }}
+          cluster-name: ${{ inputs.cluster-name || vars.CLUSTER_NAME }}
+          cluster-region: ${{ inputs.cluster-region }}
+          config-file: .deploy.yaml
+          env-template: .env.template
+          manifest-template: .k8s/deployment.yaml
+          auto-ingress: true
+          ingress-tls: true
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_HEAD_COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+          GITHUB_EVENT_HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_ENVIRONMENT: ${{ inputs.environment }}
+
+  test:
+    name: Run Acceptance Tests
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: inputs.run-acceptance-tests
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run acceptance tests
+        run: |
+          echo "Running acceptance tests against: ${{ needs.deploy.outputs.app-url }}"
+          
+          # Install dependencies
+          npm install
+          
+          # Run tests
+          APP_URL="${{ needs.deploy.outputs.app-url }}" npm run test-acceptance
+        continue-on-error: false
+
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    needs: [deploy, test]
+    if: failure() && inputs.auto-rollback
+    environment: ${{ inputs.environment }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Rollback to previous version
+        uses: huayuenh/cluster-service-action@main
+        with:
+          action: rollback
+          ibmcloud-apikey: ${{ secrets.ibmcloud-apikey }}
+          cluster-name: ${{ inputs.cluster-name || vars.CLUSTER_NAME }}
+          cluster-region: ${{ inputs.cluster-region }}
+          config-file: .deploy.yaml
+        env:
+          GITHUB_ENVIRONMENT: ${{ inputs.environment }}
+      
+      - name: Notify rollback
+        run: |
+          echo "::error::Deployment failed and was rolled back"
+          echo "### ⚠️ Deployment Rolled Back" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The deployment to **${{ inputs.environment }}** failed and was automatically rolled back." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Failed Image:** \`${{ needs.build.outputs.image }}\`" >> $GITHUB_STEP_SUMMARY
+

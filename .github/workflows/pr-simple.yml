@@ -1,0 +1,11 @@
+name: PR Validation (Using Reusable Workflow)
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  validate:
+    uses: ./.github/workflows/pr-validation-reusable.yml
+    secrets:
+      ibmcloud-apikey: ${{ secrets.IBMCLOUD_API_KEY }}
