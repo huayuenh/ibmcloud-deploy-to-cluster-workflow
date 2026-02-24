@@ -1,6 +1,6 @@
 # IBM Cloud Kubernetes CI Pipeline Example
 
-A complete GitHub Actions workflow example demonstrating automated continuous integration and deployment to IBM Cloud Kubernetes Service (IKS) using reusable custom actions.
+A complete GitHub Actions workflow example demonstrating automated continuous integration and deployment to IBM Cloud Kubernetes Service (IKS) using reusable custom actions with native Kubernetes rollback support.
 
 ## Overview
 
@@ -8,9 +8,11 @@ This repository showcases production-ready CI pipelines for containerized applic
 
 - **Pull Request CI** - Automated build, test, and scan for pull requests
 - **Continuous Deployment** - Automated deployment on merge to main branch
-- **Dynamic Image Naming** - Automatic image naming based on repository or custom inputs
+- **Automatic Rollback** - Native Kubernetes rollback using ReplicaSets on deployment failure
+- **Dynamic Image Naming** - Inline image name computation without pre-processing steps
 - **Multi-Environment Deployment** - Branch-based namespace selection (production, staging, development)
 - **Security Scanning** - Automated vulnerability scanning with IBM Cloud Container Registry
+- **Acceptance Testing** - Post-deployment validation with automatic rollback on failure
 - **Pull Request Validation** - Isolated PR builds with automatic cleanup
 - **GitHub Integration** - Commit status updates and deployment summaries
 
@@ -30,28 +32,36 @@ This repository showcases production-ready CI pipelines for containerized applic
 
 1. **Clone Repository** - Checkout source code
 2. **Run Unit Tests** - Execute Jest test suite
-3. **Build Docker Image** - Build with dynamic naming and metadata
-   - Uses `huayuenh/docker-container-build-action`
-   - Automatically names image based on repository name or custom input
+3. **Build Docker Image** - Build with dynamic inline naming
+   - Uses `docker/build-push-action@v5`
+   - Image name computed inline from repository name or custom input
+   - Tag computed from git ref (tag name or commit SHA)
    - Adds build args and OCI labels
 4. **Push to IBM Cloud Container Registry** - Push and scan image
    - Uses `huayuenh/container-registry-service-action`
    - Performs vulnerability scanning
    - Stores in IBM Cloud Container Registry
 5. **Deploy to Kubernetes** - Deploy with full configuration
-   - Uses `huayuenh/cluster-service-action`
+   - Uses `huayuenh/cluster-service-action` with `action: deploy`
    - Creates/updates deployment with 3 replicas
    - Configures ClusterIP service
    - Sets up automatic ingress with TLS
    - Performs health checks
    - Configures resource limits and requests
-6. **Display Summary** - Show deployment details in GitHub Actions UI
+6. **Run Acceptance Tests** - Validate deployment
+   - Tests application endpoint
+   - Continues on error to allow rollback
+7. **Rollback on Failure** - Automatic rollback if tests fail
+   - Uses `huayuenh/cluster-service-action` with `action: rollback`
+   - Native Kubernetes rollback using ReplicaSets
+   - Fast and atomic operation
+8. **Display Summary** - Show deployment details in GitHub Actions UI
 
 **Key Features:**
 
 ```yaml
-# Dynamic image naming - no hardcoded values
-app-name: ${{ github.event.inputs.app-name }}  # Falls back to repo name
+# Dynamic inline image naming - no pre-processing step needed
+image: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ github.event.inputs.app-name || github.event.repository.name }}:${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
 
 # Automatic namespace selection based on branch
 namespace: production  # main branch
@@ -71,6 +81,14 @@ resource-limits-cpu: 500m
 resource-limits-memory: 512Mi
 resource-requests-cpu: 250m
 resource-requests-memory: 256Mi
+
+# Automatic rollback on acceptance test failure
+- name: Rollback on failure
+  if: steps.acceptance-tests.outcome == 'failure'
+  uses: huayuenh/cluster-service-action@main
+  with:
+    action: rollback
+    deployment-name: ${{ github.event.inputs.app-name || github.event.repository.name }}
 ```
 
 **Workflow Inputs (Manual Dispatch):**
@@ -168,15 +186,18 @@ This example demonstrates the following reusable actions:
 ### 3. Cluster Service Action
 **Repository:** `huayuenh/cluster-service-action`
 
-**Purpose:** Deploy to IBM Cloud Kubernetes/OpenShift clusters
+**Purpose:** Deploy to IBM Cloud Kubernetes/OpenShift clusters with rollback support
 
 **Key Features:**
 - Kubernetes and OpenShift support
+- Deploy and rollback actions
+- Native Kubernetes rollback using ReplicaSets
 - Automatic deployment generation
 - Service and ingress creation
 - Health check validation
 - Resource configuration
 - Environment variable injection
+- Revision history tracking
 
 ### 4. Set Commit Status Action
 **Repository:** `huayuenh/set-commit-status-common-action`
@@ -388,15 +409,18 @@ docker run -p 8080:8080 hello-containers
 
 ✅ **Pull Request CI** - Validate changes before merge
 ✅ **Continuous Deployment** - Automatic deployment on merge
-✅ **Dynamic Naming** - No hardcoded image names
+✅ **Automatic Rollback** - Native Kubernetes rollback on failure
+✅ **Inline Image Naming** - Dynamic computation without pre-processing
 ✅ **Reusable Actions** - Modular, composable workflows
 ✅ **Security Scanning** - Automated vulnerability detection
+✅ **Acceptance Testing** - Post-deployment validation
 ✅ **Resource Management** - CPU and memory limits
 ✅ **Health Checks** - Deployment validation
 ✅ **Clean Architecture** - Separation of concerns
 ✅ **Automatic Cleanup** - No orphaned resources
 ✅ **Status Updates** - Clear PR feedback
 ✅ **Deployment Summaries** - Actionable information
+✅ **Fast Rollback** - ReplicaSet-based rollback in seconds
 
 ## License
 
