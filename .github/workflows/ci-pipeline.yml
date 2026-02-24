@@ -91,6 +91,10 @@ jobs:
         port: 8080
         replicas: 3
         service-type: ClusterIP
+        ingress-tls: true
+        auto-ingress: true
+        health-check-path: /
+        health-check-timeout: 300
         resource-limits-cpu: 500m
         resource-limits-memory: 512Mi
         resource-requests-cpu: 250m
